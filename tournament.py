@@ -5,7 +5,7 @@ import os
 import random
 from typing import List, Dict, Any
 
-# Требуется только TOKEN, остальное опционально
+# Требуется только TOKEN
 TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN")
 
 if not TOKEN:
@@ -13,18 +13,18 @@ if not TOKEN:
     print("Добавьте переменную DISCORD_TOKEN на Railway")
     exit(1)
 
-# Данные карт
+# Данные карт (новые названия)
 MAP1 = [
-    {"custom_id": "Anubis", "style": 3, "disable": True, "number": 4, "team": "", "user": "KazaNAVI"},
-    {"custom_id": "Inferno", "style": 1, "disable": False, "number": 6, "team": "", "user": ""},
-    {"custom_id": "Mirage", "style": 3, "disable": True, "number": 2, "team": "T", "user": "KazaNAVI"},
-    {"custom_id": "Nuke", "style": 1, "disable": True, "number": 5, "team": "", "user": "RUstralis"}
+    {"custom_id": "Склад", "style": 3, "disable": True, "number": 4, "team": "", "user": "KazaNAVI"},
+    {"custom_id": "Гетто", "style": 1, "disable": False, "number": 6, "team": "", "user": ""},
+    {"custom_id": "Парковка", "style": 3, "disable": True, "number": 2, "team": "T", "user": "KazaNAVI"},
+    {"custom_id": "Трейлера", "style": 1, "disable": True, "number": 5, "team": "", "user": "RUstralis"}
 ]
 
 MAP2 = [
-    {"custom_id": "Overpass", "style": 3, "disable": True, "number": 0, "team": "", "user": "KazaNAVI"},
-    {"custom_id": "Ancient", "style": 1, "disable": True, "number": 1, "team": "", "user": "RUstralis"},
-    {"custom_id": "Vertigo", "style": 3, "disable": True, "number": 3, "team": "CT", "user": "RUstralis"}
+    {"custom_id": "Ферма", "style": 3, "disable": True, "number": 0, "team": "", "user": "KazaNAVI"},
+    {"custom_id": "Склад", "style": 1, "disable": True, "number": 1, "team": "", "user": "RUstralis"},
+    {"custom_id": "Гетто", "style": 3, "disable": True, "number": 3, "team": "CT", "user": "RUstralis"}
 ]
 
 class TournamentBot(commands.Bot):
@@ -38,20 +38,21 @@ class TournamentBot(commands.Bot):
         
         # Состояние матча
         self.current_match = {
-            'team1': None,
-            'team2': None,
+            'team1_captain': None,
+            'team2_captain': None,
+            'team1_name': None,
+            'team2_name': None,
             'current_turn': None,
             'map_data_1': None,
             'map_data_2': None,
             'ban_count': 0
         }
         
-        # Разрешенные роли (можно настроить через переменную окружения)
+        # Разрешенные роли (опционально)
         roles_str = os.getenv("ALLOWED_ROLES", "")
         self.allowed_roles = [int(r.strip()) for r in roles_str.split(",") if r.strip()] if roles_str else []
     
     async def setup_hook(self):
-        # Синхронизируем команды глобально (не нужно указывать guild_id)
         await self.tree.sync()
         print("✅ Команды синхронизированы глобально")
 
@@ -59,12 +60,11 @@ bot = TournamentBot()
 
 def check_role(interaction: discord.Interaction) -> tuple:
     """Проверка наличия у пользователя разрешенной роли"""
-    if not interaction.guild:
-        return False, "Сервер не найден"
-    
-    # Если нет настроенных ролей - доступ открыт всем
     if not bot.allowed_roles:
         return True, "Доступ открыт всем"
+    
+    if not interaction.guild:
+        return False, "Сервер не найден"
     
     member = interaction.guild.get_member(interaction.user.id)
     if not member:
@@ -79,8 +79,19 @@ def check_role(interaction: discord.Interaction) -> tuple:
     return False, "У вас нет необходимой роли"
 
 @bot.tree.command(name="startmatch", description="Запустить матч (выбор/бан карт)")
-@app_commands.describe(team1="Выберите команду 1", team2="Выберите команду 2")
-async def startmatch(interaction: discord.Interaction, team1: discord.Role, team2: discord.Role):
+@app_commands.describe(
+    captain1="Выберите капитана команды 1",
+    captain2="Выберите капитана команды 2",
+    team1_name="Название команды 1",
+    team2_name="Название команды 2"
+)
+async def startmatch(
+    interaction: discord.Interaction, 
+    captain1: discord.Member,
+    captain2: discord.Member,
+    team1_name: str,
+    team2_name: str
+):
     """Команда для запуска матча"""
     
     # Проверяем права доступа
@@ -90,24 +101,29 @@ async def startmatch(interaction: discord.Interaction, team1: discord.Role, team
         error_embed = discord.Embed(
             color=0xFF0000,
             title="❌ Нет доступа",
-            description=f"**{message}**\n\n"
-                       f"Для использования этой команды нужна специальная роль.\n"
-                       f"Обратитесь к администратору сервера."
+            description=f"**{message}**\n\nДля использования этой команды нужна специальная роль."
         )
         await interaction.response.send_message(embed=error_embed, ephemeral=True)
+        return
+    
+    # Проверяем, что капитаны разные
+    if captain1.id == captain2.id:
+        await interaction.response.send_message("❌ Капитаны команд должны быть разными пользователями!", ephemeral=True)
         return
     
     await interaction.response.defer()
     
     # Инициализация состояния матча
-    bot.current_match['team1'] = team1.id
-    bot.current_match['team2'] = team2.id
+    bot.current_match['team1_captain'] = captain1.id
+    bot.current_match['team2_captain'] = captain2.id
+    bot.current_match['team1_name'] = team1_name
+    bot.current_match['team2_name'] = team2_name
     bot.current_match['map_data_1'] = [map_item.copy() for map_item in MAP1]
     bot.current_match['map_data_2'] = [map_item.copy() for map_item in MAP2]
     bot.current_match['ban_count'] = 0
     
-    # Случайная команда для первого бана
-    teams_list = [team1.id, team2.id]
+    # Случайный выбор кто начинает
+    teams_list = [captain1.id, captain2.id]
     bot.current_match['current_turn'] = random.choice(teams_list)
     
     # Сброс состояния карт
@@ -123,31 +139,39 @@ async def startmatch(interaction: discord.Interaction, team1: discord.Role, team
         map_item['number'] = 6
         map_item['team'] = ''
     
+    # Определяем кто сейчас ходит
+    current_captain_name = captain1.display_name if bot.current_match['current_turn'] == captain1.id else captain2.display_name
+    current_team_name = team1_name if bot.current_match['current_turn'] == captain1.id else team2_name
+    
     # Создание эмбеда
     embed = discord.Embed(
         color=0xFA747D,
         title="🎯 Выберите карту для бана",
-        description="Нажмите на кнопку с картой, которую хотите забанить"
+        description="Нажмите на кнопку с картой, которую хотите забанить\n\n**Доступные карты:**\nСклад, Гетто, Парковка, Трейлера, Ферма"
     )
     embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
-    current_team_name = team1.name if bot.current_match['current_turn'] == team1.id else team2.name
-    embed.set_footer(text=f"Сейчас выбирает: {current_team_name}")
+    embed.add_field(name="Команда 1", value=f"{team1_name}\nКапитан: {captain1.mention}", inline=True)
+    embed.add_field(name="Команда 2", value=f"{team2_name}\nКапитан: {captain2.mention}", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    embed.set_footer(text=f"Сейчас выбирает: {current_team_name} ({current_captain_name})")
     
     # Создаем view
-    view = MapBanView(bot, team1.id, team2.id, team1.name, team2.name)
+    view = MapBanView(bot, captain1.id, captain2.id, team1_name, team2_name, captain1.display_name, captain2.display_name)
     
     await interaction.followup.send(embed=embed, view=view)
 
 class MapBanView(discord.ui.View):
     """View для обработки бана карт"""
     
-    def __init__(self, bot_instance, team1_id, team2_id, team1_name, team2_name):
+    def __init__(self, bot_instance, captain1_id, captain2_id, team1_name, team2_name, captain1_name, captain2_name):
         super().__init__(timeout=300)
         self.bot = bot_instance
-        self.team1_id = team1_id
-        self.team2_id = team2_id
+        self.captain1_id = captain1_id
+        self.captain2_id = captain2_id
         self.team1_name = team1_name
         self.team2_name = team2_name
+        self.captain1_name = captain1_name
+        self.captain2_name = captain2_name
         
         self.update_buttons()
     
@@ -158,180 +182,118 @@ class MapBanView(discord.ui.View):
         style_map = {1: discord.ButtonStyle.primary, 2: discord.ButtonStyle.secondary,
                     3: discord.ButtonStyle.success, 4: discord.ButtonStyle.danger}
         
-        # Добавляем кнопки из первой группы
+        # Получаем все уникальные карты
+        all_maps = {}
         for map_item in self.bot.current_match['map_data_1']:
-            button = discord.ui.Button(
-                style=style_map.get(map_item['style'], discord.ButtonStyle.secondary),
-                label=map_item['custom_id'],
-                custom_id=f"map1_{map_item['custom_id']}",
-                disabled=map_item['disable']
-            )
-            button.callback = self.create_callback(map_item, 'map1')
-            self.add_item(button)
-        
-        # Добавляем кнопки из второй группы
+            all_maps[map_item['custom_id']] = map_item
         for map_item in self.bot.current_match['map_data_2']:
+            if map_item['custom_id'] not in all_maps:
+                all_maps[map_item['custom_id']] = map_item
+        
+        # Создаем кнопки для каждой карты
+        for map_name, map_item in all_maps.items():
             button = discord.ui.Button(
                 style=style_map.get(map_item['style'], discord.ButtonStyle.secondary),
-                label=map_item['custom_id'],
-                custom_id=f"map2_{map_item['custom_id']}",
+                label=map_name,
+                custom_id=f"map_{map_name}",
                 disabled=map_item['disable']
             )
-            button.callback = self.create_callback(map_item, 'map2')
+            button.callback = self.create_callback(map_item)
             self.add_item(button)
     
-    def create_callback(self, map_item, map_type):
+    def create_callback(self, map_item):
         async def callback(interaction: discord.Interaction):
-            await self.handle_map_ban(interaction, map_item, map_type)
+            await self.handle_map_ban(interaction, map_item)
         return callback
     
-    async def handle_map_ban(self, interaction: discord.Interaction, map_item: Dict[str, Any], map_type: str):
+    async def handle_map_ban(self, interaction: discord.Interaction, map_item: Dict[str, Any]):
         """Обработка бана карты"""
         
         guild = interaction.guild
         
-        # Проверяем очередь
-        member = guild.get_member(interaction.user.id)
-        if not member:
-            await interaction.response.send_message("❌ Ошибка!", ephemeral=True)
+        # Проверяем, что нажал текущий капитан
+        if interaction.user.id != self.bot.current_match['current_turn']:
+            current_captain_name = self.captain1_name if self.bot.current_match['current_turn'] == self.captain1_id else self.captain2_name
+            await interaction.response.send_message(f"⏰ Сейчас не ваш ход! Сейчас выбирает: {current_captain_name}", ephemeral=True)
             return
         
-        user_roles = [role.id for role in member.roles]
-        if self.bot.current_match['current_turn'] not in user_roles:
-            await interaction.response.send_message("⏰ Сейчас не ваш ход!", ephemeral=True)
-            return
-        
-        # Баним карту
-        target_list = self.bot.current_match['map_data_1'] if map_type == 'map1' else self.bot.current_match['map_data_2']
-        
-        for item in target_list:
-            if item['custom_id'] == map_item['custom_id']:
-                item['disable'] = True
-                current_role = guild.get_role(self.bot.current_match['current_turn'])
-                item['user'] = current_role.name if current_role else "Unknown"
-                item['number'] = self.bot.current_match['ban_count']
+        # Находим карту в обоих списках и баним
+        found = False
+        for target_list in [self.bot.current_match['map_data_1'], self.bot.current_match['map_data_2']]:
+            for item in target_list:
+                if item['custom_id'] == map_item['custom_id']:
+                    item['disable'] = True
+                    current_captain = guild.get_member(self.bot.current_match['current_turn'])
+                    item['user'] = current_captain.display_name if current_captain else "Unknown"
+                    item['number'] = self.bot.current_match['ban_count']
+                    found = True
+                    break
+            if found:
                 break
         
         self.bot.current_match['ban_count'] += 1
         
         # Меняем очередь
-        self.bot.current_match['current_turn'] = self.team2_id if self.bot.current_match['current_turn'] == self.team1_id else self.team1_id
+        if self.bot.current_match['current_turn'] == self.captain1_id:
+            self.bot.current_match['current_turn'] = self.captain2_id
+        else:
+            self.bot.current_match['current_turn'] = self.captain1_id
         
-        # Проверяем, закончились ли баны
-        if self.bot.current_match['ban_count'] >= 6:
-            await self.handle_side_selection(interaction)
+        # Проверяем, закончились ли баны (5 карт - 4 бана, 1 остается)
+        if self.bot.current_match['ban_count'] >= 4:
+            await self.handle_final_map(interaction)
         else:
             # Обновляем эмбед
+            current_captain = guild.get_member(self.bot.current_match['current_turn'])
+            current_team = self.team1_name if self.bot.current_match['current_turn'] == self.captain1_id else self.team2_name
+            current_captain_name = current_captain.display_name if current_captain else "Unknown"
+            
             embed = discord.Embed(
                 color=0xFA747D,
                 title="🎯 Выберите карту для бана",
-                description="Нажмите на кнопку с картой, которую хотите забанить"
+                description=f"Нажмите на кнопку с картой, которую хотите забанить\n\n**Осталось банов:** {4 - self.bot.current_match['ban_count']}"
             )
             embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
-            current_team = guild.get_role(self.bot.current_match['current_turn'])
-            embed.set_footer(text=f"Сейчас выбирает: {current_team.name if current_team else 'Неизвестно'}")
+            embed.add_field(name="Команда 1", value=f"{self.team1_name}\nКапитан: <@{self.captain1_id}>", inline=True)
+            embed.add_field(name="Команда 2", value=f"{self.team2_name}\nКапитан: <@{self.captain2_id}>", inline=True)
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
+            embed.set_footer(text=f"Сейчас выбирает: {current_team} ({current_captain_name})")
             
             self.update_buttons()
             await interaction.response.edit_message(embed=embed, view=self)
     
-    async def handle_side_selection(self, interaction: discord.Interaction):
-        """Обработка выбора сторон"""
+    async def handle_final_map(self, interaction: discord.Interaction):
+        """Обработка финальной карты (которая осталась после банов)"""
         
-        # Сортируем карты
-        all_maps = self.bot.current_match['map_data_1'] + self.bot.current_match['map_data_2']
-        all_maps.sort(key=lambda x: x['number'])
+        # Находим оставшуюся карту
+        remaining_map = None
+        for map_item in self.bot.current_match['map_data_1']:
+            if not map_item['disable']:
+                remaining_map = map_item
+                break
+        if not remaining_map:
+            for map_item in self.bot.current_match['map_data_2']:
+                if not map_item['disable']:
+                    remaining_map = map_item
+                    break
         
-        pick1_map = all_maps[2]
-        pick2_map = all_maps[3]
-        
-        view = SideSelectionView(self.bot, self.team1_id, self.team2_id, self.team1_name, self.team2_name,
-                                pick1_map, pick2_map, all_maps)
-        
-        embed = discord.Embed(
-            color=0xFA747D,
-            title="⚔️ Выбор сторон",
-            description=f"**Карта:** {pick1_map['custom_id']}\n**Выбирает команда:** {pick2_map['user']}"
-        )
-        embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
-        
-        await interaction.response.edit_message(embed=embed, view=view)
-
-class SideSelectionView(discord.ui.View):
-    """View для выбора стороны"""
-    
-    def __init__(self, bot_instance, team1_id, team2_id, team1_name, team2_name, pick1_map, pick2_map, all_maps):
-        super().__init__(timeout=120)
-        self.bot = bot_instance
-        self.team1_id = team1_id
-        self.team2_id = team2_id
-        self.team1_name = team1_name
-        self.team2_name = team2_name
-        self.pick1_map = pick1_map
-        self.pick2_map = pick2_map
-        self.all_maps = all_maps
-        self.selection_step = 1
-    
-    @discord.ui.button(label="CT", style=discord.ButtonStyle.primary)
-    async def ct_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_side_choice(interaction, "CT")
-    
-    @discord.ui.button(label="T", style=discord.ButtonStyle.danger)
-    async def t_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_side_choice(interaction, "T")
-    
-    async def handle_side_choice(self, interaction: discord.Interaction, side: str):
-        """Обработка выбора стороны"""
-        
-        guild = interaction.guild
-        member = guild.get_member(interaction.user.id)
-        
-        if not member:
-            await interaction.response.send_message("❌ Ошибка!", ephemeral=True)
-            return
-        
-        user_roles = [role.id for role in member.roles]
-        
-        if self.selection_step == 1:
-            # Проверяем для первого выбора
-            expected_team_id = self.team2_id if self.pick2_map['user'] == self.team1_name else self.team1_id
+        if remaining_map:
+            # Создаем эмбед с результатом
+            result_text = f"**Оставшаяся карта:** {remaining_map['custom_id']}\n\n"
+            result_text += "**История банов:**\n"
             
-            if expected_team_id not in user_roles:
-                await interaction.response.send_message("⏰ Сейчас не ваш ход!", ephemeral=True)
-                return
+            # Собираем все баны
+            all_bans = []
+            for map_item in self.bot.current_match['map_data_1']:
+                if map_item['disable']:
+                    all_bans.append((map_item['number'], map_item['custom_id'], map_item['user']))
+            for map_item in self.bot.current_match['map_data_2']:
+                if map_item['disable']:
+                    all_bans.append((map_item['number'], map_item['custom_id'], map_item['user']))
             
-            self.pick1_map['team'] = "T" if side == "CT" else "CT"
-            self.selection_step = 2
-            
-            embed = discord.Embed(
-                color=0xFA747D,
-                title="⚔️ Выбор сторон",
-                description=f"**Карта:** {self.pick2_map['custom_id']}\n**Выбирает команда:** {self.pick1_map['user']}"
-            )
-            embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
-            
-            await interaction.response.edit_message(embed=embed, view=self)
-            
-        else:
-            # Проверяем для второго выбора
-            expected_team_id = self.team1_id if self.pick1_map['user'] == self.team1_name else self.team2_id
-            
-            if expected_team_id not in user_roles:
-                await interaction.response.send_message("⏰ Сейчас не ваш ход!", ephemeral=True)
-                return
-            
-            self.pick2_map['team'] = "T" if side == "CT" else "CT"
-            
-            # Формируем результат
-            result_text = ""
-            for i, map_item in enumerate(self.all_maps):
-                if i < 2:
-                    result_text += f"🚫 Ban - {map_item['custom_id']} ({map_item['user']})\n"
-                elif i < 4:
-                    result_text += f"✅ Pick - {map_item['custom_id']} ({map_item['user']} - {map_item['team']})\n"
-                elif i < 6:
-                    result_text += f"🚫 Ban - {map_item['custom_id']} ({map_item['user']})\n"
-                else:
-                    result_text += f"🎲 Decider - {map_item['custom_id']}"
+            all_bans.sort(key=lambda x: x[0])
+            for ban_num, map_name, user in all_bans:
+                result_text += f"{ban_num + 1}. 🚫 {map_name} (забанил: {user})\n"
             
             embed = discord.Embed(
                 color=0x00FF00,
@@ -339,6 +301,8 @@ class SideSelectionView(discord.ui.View):
                 description=result_text
             )
             embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
+            embed.add_field(name="Команда 1", value=f"{self.team1_name}\nКапитан: <@{self.captain1_id}>", inline=True)
+            embed.add_field(name="Команда 2", value=f"{self.team2_name}\nКапитан: <@{self.captain2_id}>", inline=True)
             
             await interaction.response.edit_message(embed=embed, view=None)
 
@@ -354,7 +318,9 @@ async def on_ready():
         print('📋 Доступ к командам открыт для всех пользователей')
     
     print('\n🎮 Бот готов к работе!')
+    print('🎯 Доступные карты: Склад, Гетто, Парковка, Трейлера, Ферма')
     print('💡 Используйте команду /startmatch для запуска матча')
+    print('📝 Формат: /startmatch captain1:@Пользователь captain2:@Пользователь team1_name:"Название" team2_name:"Название"')
 
 if __name__ == "__main__":
     print("🚀 Запуск бота...")
