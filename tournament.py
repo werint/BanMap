@@ -47,14 +47,17 @@ async def startmatch(interaction: discord.Interaction, captain1: discord.Member,
     # Создаем кнопки
     view = BanView(bot.match_data[interaction.channel_id], captain1, captain2)
     
+    current_captain = captain1 if bot.match_data[interaction.channel_id]['turn'] == captain1.id else captain2
+    
     embed = discord.Embed(
         color=0xFA747D,
         title="🎯 Бан карт",
-        description=f"**Доступные карты:**\n{', '.join(MAPS)}\n\n**Осталось банов:** 4",
-        footer=f"Сейчас выбирает: {captain1.display_name if bot.match_data[interaction.channel_id]['turn'] == captain1.id else captain2.display_name}"
+        description=f"**Доступные карты:**\n{', '.join(MAPS)}\n\n**Осталось банов:** 4"
     )
+    embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
     embed.add_field(name="👤 Капитан 1", value=captain1.mention, inline=True)
     embed.add_field(name="👤 Капитан 2", value=captain2.mention, inline=True)
+    embed.set_footer(text=f"Сейчас выбирает: {current_captain.display_name}")
     
     await interaction.response.send_message(embed=embed, view=view)
 
@@ -82,30 +85,49 @@ class BanView(discord.ui.View):
             self.match_data['banned'].append(map_name)
             
             # Меняем ход
-            self.match_data['turn'] = self.captain2.id if self.match_data['turn'] == self.captain1.id else self.captain1.id
+            if self.match_data['turn'] == self.captain1.id:
+                self.match_data['turn'] = self.captain2.id
+            else:
+                self.match_data['turn'] = self.captain1.id
             
-            # Проверяем окончание
+            # Проверяем окончание (4 бана из 5 карт)
             if len(self.match_data['banned']) >= 4:
                 remaining = [m for m in self.match_data['maps'] if m not in self.match_data['banned']][0]
+                
+                # История банов
+                ban_history = ""
+                for i, m in enumerate(self.match_data['banned']):
+                    ban_history += f"{i+1}. 🚫 {m}\n"
+                
                 embed = discord.Embed(
                     color=0x00FF00,
-                    title="🎉 Результат",
-                    description=f"**Финальная карта:** {remaining}\n\n**История банов:**\n" + 
-                                "\n".join([f"{i+1}. 🚫 {m}" for i, m in enumerate(self.match_data['banned'])])
+                    title="🎉 Результаты выбора карт",
+                    description=f"**Финальная карта:** {remaining}\n\n**История банов:**\n{ban_history}"
                 )
+                embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
+                embed.add_field(name="👤 Капитан 1", value=self.captain1.mention, inline=True)
+                embed.add_field(name="👤 Капитан 2", value=self.captain2.mention, inline=True)
+                
                 await interaction.response.edit_message(embed=embed, view=None)
             else:
                 # Обновляем кнопки
                 self.clear_items()
                 self.add_buttons()
                 
-                current = self.captain1 if self.match_data['turn'] == self.captain1.id else self.captain2
+                current_captain = self.captain1 if self.match_data['turn'] == self.captain1.id else self.captain2
+                
+                banned_list = ', '.join(self.match_data['banned']) if self.match_data['banned'] else 'пока нет'
+                
                 embed = discord.Embed(
                     color=0xFA747D,
                     title="🎯 Бан карт",
-                    description=f"**Осталось банов:** {4 - len(self.match_data['banned'])}\n\n**Забанено:** {', '.join(self.match_data['banned']) if self.match_data['banned'] else 'пока нет'}",
-                    footer=f"Сейчас выбирает: {current.display_name}"
+                    description=f"**Осталось банов:** {4 - len(self.match_data['banned'])}\n\n**Забанено:** {banned_list}"
                 )
+                embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
+                embed.add_field(name="👤 Капитан 1", value=self.captain1.mention, inline=True)
+                embed.add_field(name="👤 Капитан 2", value=self.captain2.mention, inline=True)
+                embed.set_footer(text=f"Сейчас выбирает: {current_captain.display_name}")
+                
                 await interaction.response.edit_message(embed=embed, view=self)
         
         return callback
@@ -113,7 +135,9 @@ class BanView(discord.ui.View):
 @bot.event
 async def on_ready():
     print(f'✅ Бот запущен: {bot.user.name}')
-    print(f'🎮 Используйте /startmatch')
+    print(f'🎮 Используйте команду /startmatch')
+    print(f'📝 Формат: /startmatch captain1:@Капитан1 captain2:@Капитан2')
 
 if __name__ == "__main__":
+    print("🚀 Запуск бота...")
     bot.run(TOKEN)
