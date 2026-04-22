@@ -144,7 +144,7 @@ async def startmatch(
     embed.add_field(name="Капитан 1", value=captain1.mention, inline=True)
     embed.add_field(name="Капитан 2", value=captain2.mention, inline=True)
     embed.add_field(name="\u200b", value="\u200b", inline=True)
-    embed.set_footer(text=f"Сейчас выбирает: {current_captan.display_name}")
+    embed.set_footer(text=f"Сейчас выбирает: {current_captain.display_name}")
     
     # Создаем view
     view = MapBanView(bot, captain1.id, captain2.id, captain1.display_name, captain2.display_name)
