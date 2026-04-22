@@ -13,18 +13,18 @@ if not TOKEN:
     print("Добавьте переменную DISCORD_TOKEN на Railway")
     exit(1)
 
-# Данные карт (новые названия)
+# Данные карт
 MAP1 = [
-    {"custom_id": "Склад", "style": 3, "disable": True, "number": 4, "team": "", "user": "KazaNAVI"},
+    {"custom_id": "Склад", "style": 3, "disable": True, "number": 4, "team": "", "user": ""},
     {"custom_id": "Гетто", "style": 1, "disable": False, "number": 6, "team": "", "user": ""},
-    {"custom_id": "Парковка", "style": 3, "disable": True, "number": 2, "team": "T", "user": "KazaNAVI"},
-    {"custom_id": "Трейлера", "style": 1, "disable": True, "number": 5, "team": "", "user": "RUstralis"}
+    {"custom_id": "Парковка", "style": 3, "disable": True, "number": 2, "team": "", "user": ""},
+    {"custom_id": "Трейлера", "style": 1, "disable": True, "number": 5, "team": "", "user": ""}
 ]
 
 MAP2 = [
-    {"custom_id": "Ферма", "style": 3, "disable": True, "number": 0, "team": "", "user": "KazaNAVI"},
-    {"custom_id": "Склад", "style": 1, "disable": True, "number": 1, "team": "", "user": "RUstralis"},
-    {"custom_id": "Гетто", "style": 3, "disable": True, "number": 3, "team": "CT", "user": "RUstralis"}
+    {"custom_id": "Ферма", "style": 3, "disable": True, "number": 0, "team": "", "user": ""},
+    {"custom_id": "Склад", "style": 1, "disable": True, "number": 1, "team": "", "user": ""},
+    {"custom_id": "Гетто", "style": 3, "disable": True, "number": 3, "team": "", "user": ""}
 ]
 
 class TournamentBot(commands.Bot):
@@ -38,10 +38,8 @@ class TournamentBot(commands.Bot):
         
         # Состояние матча
         self.current_match = {
-            'team1_captain': None,
-            'team2_captain': None,
-            'team1_name': None,
-            'team2_name': None,
+            'captain1': None,
+            'captain2': None,
             'current_turn': None,
             'map_data_1': None,
             'map_data_2': None,
@@ -81,16 +79,12 @@ def check_role(interaction: discord.Interaction) -> tuple:
 @bot.tree.command(name="startmatch", description="Запустить матч (выбор/бан карт)")
 @app_commands.describe(
     captain1="Выберите капитана команды 1",
-    captain2="Выберите капитана команды 2",
-    team1_name="Название команды 1",
-    team2_name="Название команды 2"
+    captain2="Выберите капитана команды 2"
 )
 async def startmatch(
     interaction: discord.Interaction, 
     captain1: discord.Member,
-    captain2: discord.Member,
-    team1_name: str,
-    team2_name: str
+    captain2: discord.Member
 ):
     """Команда для запуска матча"""
     
@@ -114,10 +108,8 @@ async def startmatch(
     await interaction.response.defer()
     
     # Инициализация состояния матча
-    bot.current_match['team1_captain'] = captain1.id
-    bot.current_match['team2_captain'] = captain2.id
-    bot.current_match['team1_name'] = team1_name
-    bot.current_match['team2_name'] = team2_name
+    bot.current_match['captain1'] = captain1.id
+    bot.current_match['captain2'] = captain2.id
     bot.current_match['map_data_1'] = [map_item.copy() for map_item in MAP1]
     bot.current_match['map_data_2'] = [map_item.copy() for map_item in MAP2]
     bot.current_match['ban_count'] = 0
@@ -140,8 +132,7 @@ async def startmatch(
         map_item['team'] = ''
     
     # Определяем кто сейчас ходит
-    current_captain_name = captain1.display_name if bot.current_match['current_turn'] == captain1.id else captain2.display_name
-    current_team_name = team1_name if bot.current_match['current_turn'] == captain1.id else team2_name
+    current_captain = captain1 if bot.current_match['current_turn'] == captain1.id else captain2
     
     # Создание эмбеда
     embed = discord.Embed(
@@ -150,26 +141,24 @@ async def startmatch(
         description="Нажмите на кнопку с картой, которую хотите забанить\n\n**Доступные карты:**\nСклад, Гетто, Парковка, Трейлера, Ферма"
     )
     embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
-    embed.add_field(name="Команда 1", value=f"{team1_name}\nКапитан: {captain1.mention}", inline=True)
-    embed.add_field(name="Команда 2", value=f"{team2_name}\nКапитан: {captain2.mention}", inline=True)
+    embed.add_field(name="Капитан 1", value=captain1.mention, inline=True)
+    embed.add_field(name="Капитан 2", value=captain2.mention, inline=True)
     embed.add_field(name="\u200b", value="\u200b", inline=True)
-    embed.set_footer(text=f"Сейчас выбирает: {current_team_name} ({current_captain_name})")
+    embed.set_footer(text=f"Сейчас выбирает: {current_captan.display_name}")
     
     # Создаем view
-    view = MapBanView(bot, captain1.id, captain2.id, team1_name, team2_name, captain1.display_name, captain2.display_name)
+    view = MapBanView(bot, captain1.id, captain2.id, captain1.display_name, captain2.display_name)
     
     await interaction.followup.send(embed=embed, view=view)
 
 class MapBanView(discord.ui.View):
     """View для обработки бана карт"""
     
-    def __init__(self, bot_instance, captain1_id, captain2_id, team1_name, team2_name, captain1_name, captain2_name):
+    def __init__(self, bot_instance, captain1_id, captain2_id, captain1_name, captain2_name):
         super().__init__(timeout=300)
         self.bot = bot_instance
         self.captain1_id = captain1_id
         self.captain2_id = captain2_id
-        self.team1_name = team1_name
-        self.team2_name = team2_name
         self.captain1_name = captain1_name
         self.captain2_name = captain2_name
         
@@ -245,7 +234,6 @@ class MapBanView(discord.ui.View):
         else:
             # Обновляем эмбед
             current_captain = guild.get_member(self.bot.current_match['current_turn'])
-            current_team = self.team1_name if self.bot.current_match['current_turn'] == self.captain1_id else self.team2_name
             current_captain_name = current_captain.display_name if current_captain else "Unknown"
             
             embed = discord.Embed(
@@ -254,10 +242,10 @@ class MapBanView(discord.ui.View):
                 description=f"Нажмите на кнопку с картой, которую хотите забанить\n\n**Осталось банов:** {4 - self.bot.current_match['ban_count']}"
             )
             embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
-            embed.add_field(name="Команда 1", value=f"{self.team1_name}\nКапитан: <@{self.captain1_id}>", inline=True)
-            embed.add_field(name="Команда 2", value=f"{self.team2_name}\nКапитан: <@{self.captain2_id}>", inline=True)
+            embed.add_field(name="Капитан 1", value=f"<@{self.captain1_id}>", inline=True)
+            embed.add_field(name="Капитан 2", value=f"<@{self.captain2_id}>", inline=True)
             embed.add_field(name="\u200b", value="\u200b", inline=True)
-            embed.set_footer(text=f"Сейчас выбирает: {current_team} ({current_captain_name})")
+            embed.set_footer(text=f"Сейчас выбирает: {current_captain_name}")
             
             self.update_buttons()
             await interaction.response.edit_message(embed=embed, view=self)
@@ -279,8 +267,8 @@ class MapBanView(discord.ui.View):
         
         if remaining_map:
             # Создаем эмбед с результатом
-            result_text = f"**Оставшаяся карта:** {remaining_map['custom_id']}\n\n"
-            result_text += "**История банов:**\n"
+            result_text = f"**🎮 Финальная карта:** {remaining_map['custom_id']}\n\n"
+            result_text += "**📋 История банов:**\n"
             
             # Собираем все баны
             all_bans = []
@@ -293,7 +281,7 @@ class MapBanView(discord.ui.View):
             
             all_bans.sort(key=lambda x: x[0])
             for ban_num, map_name, user in all_bans:
-                result_text += f"{ban_num + 1}. 🚫 {map_name} (забанил: {user})\n"
+                result_text += f"{ban_num + 1}. 🚫 **{map_name}** (забанил: {user})\n"
             
             embed = discord.Embed(
                 color=0x00FF00,
@@ -301,8 +289,9 @@ class MapBanView(discord.ui.View):
                 description=result_text
             )
             embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
-            embed.add_field(name="Команда 1", value=f"{self.team1_name}\nКапитан: <@{self.captain1_id}>", inline=True)
-            embed.add_field(name="Команда 2", value=f"{self.team2_name}\nКапитан: <@{self.captain2_id}>", inline=True)
+            embed.add_field(name="👤 Капитан 1", value=f"<@{self.captain1_id}>", inline=True)
+            embed.add_field(name="👤 Капитан 2", value=f"<@{self.captain2_id}>", inline=True)
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
             
             await interaction.response.edit_message(embed=embed, view=None)
 
@@ -320,7 +309,7 @@ async def on_ready():
     print('\n🎮 Бот готов к работе!')
     print('🎯 Доступные карты: Склад, Гетто, Парковка, Трейлера, Ферма')
     print('💡 Используйте команду /startmatch для запуска матча')
-    print('📝 Формат: /startmatch captain1:@Пользователь captain2:@Пользователь team1_name:"Название" team2_name:"Название"')
+    print('📝 Формат: /startmatch captain1:@Капитан1 captain2:@Капитан2')
 
 if __name__ == "__main__":
     print("🚀 Запуск бота...")
