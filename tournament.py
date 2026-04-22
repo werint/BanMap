@@ -54,22 +54,45 @@ bot = TournamentBot()
 
 def check_role(interaction: discord.Interaction) -> bool:
     """Проверка наличия у пользователя иммунной роли"""
-    if not interaction.member:
+    # Получаем участника из гильдии
+    if not interaction.guild:
         return False
     
-    member_roles = [role.id for role in interaction.member.roles]
+    member = interaction.guild.get_member(interaction.user.id)
+    if not member:
+        return False
+    
+    member_roles = [role.id for role in member.roles]
     for immunity_role in CONFIG['roleImmunityId']:
         if int(immunity_role) in member_roles:
             return True
     return False
 
-def check_role_map(interaction: discord.Interaction, role_id: int) -> bool:
-    """Проверка наличия конкретной роли"""
-    if not interaction.member:
+def check_role_by_id(interaction: discord.Interaction, role_id: int) -> bool:
+    """Проверка наличия конкретной роли у пользователя"""
+    if not interaction.guild:
         return False
     
-    member_roles = [role.id for role in interaction.member.roles]
+    member = interaction.guild.get_member(interaction.user.id)
+    if not member:
+        return False
+    
+    member_roles = [role.id for role in member.roles]
     return role_id in member_roles
+
+def check_role_by_name(interaction: discord.Interaction, role_name: str) -> bool:
+    """Проверка наличия роли по имени"""
+    if not interaction.guild:
+        return False
+    
+    member = interaction.guild.get_member(interaction.user.id)
+    if not member:
+        return False
+    
+    for role in member.roles:
+        if role.name == role_name:
+            return True
+    return False
 
 def create_button(map_item: Dict[str, Any]) -> discord.Button:
     """Создание кнопки для карты"""
@@ -79,16 +102,9 @@ def create_button(map_item: Dict[str, Any]) -> discord.Button:
     return discord.Button(
         style=style_map.get(map_item['style'], discord.ButtonStyle.secondary),
         label=map_item['custom_id'],
-        custom_id=map_item['custom_id'],
+        custom_id=f"map_{map_item['custom_id']}",
         disabled=map_item['disable']
     )
-
-def get_buttons_from_maps(map_data: List[Dict[str, Any]]) -> List[discord.Button]:
-    """Получение списка кнопок из данных карт"""
-    buttons = []
-    for map_item in map_data:
-        buttons.append(create_button(map_item))
-    return buttons
 
 @bot.tree.command(name="startmatch", description="Запустить матч")
 @app_commands.describe(team1="Выберите команду 1", team2="Выберите команду 2")
@@ -131,19 +147,9 @@ async def startmatch(interaction: discord.Interaction, team1: discord.Role, team
     embed.set_author(name="SDTV.GG", url="https://sdtv.gg/")
     embed.set_footer(text=f"Сейчас выбирает: {interaction.guild.get_role(bot.current_match['current_turn']).name}")
     
-    # Создание кнопок
-    buttons_row1 = get_buttons_from_maps(bot.current_match['map_data_1'])
-    buttons_row2 = get_buttons_from_maps(bot.current_match['map_data_2'])
-    
-    # Создание ActionRow
-    row1 = discord.ui.ActionRow(*buttons_row1[:5]) if len(buttons_row1) > 0 else discord.ui.ActionRow()
-    row2 = discord.ui.ActionRow(*buttons_row2[:5]) if len(buttons_row2) > 0 else discord.ui.ActionRow()
-    
-    await interaction.response.send_message(embed=embed, components=[row1, row2])
-    
-    # Создание view для обработки кнопок
-    view = MapBanView(bot, interaction.guild_id, team1.id, team2.id)
-    await interaction.edit_original_response(view=view)
+    # Создаем и отправляем view
+    view = MapBanView(bot, interaction.guild.id, team1.id, team2.id)
+    await interaction.response.send_message(embed=embed, view=view)
 
 class MapBanView(discord.ui.View):
     """View для обработки бана карт"""
@@ -157,7 +163,7 @@ class MapBanView(discord.ui.View):
         self.ban_count = 0
         self.current_turn = random.choice([team1_id, team2_id])
         
-        # Обновляем кнопки
+        # Добавляем кнопки
         self.update_buttons()
     
     def update_buttons(self):
@@ -175,7 +181,6 @@ class MapBanView(discord.ui.View):
                 custom_id=f"map1_{map_item['custom_id']}",
                 disabled=map_item['disable']
             )
-            button.callback = self.create_callback(map_item, 'map1')
             self.add_item(button)
         
         # Создаем кнопки для второй группы карт
@@ -189,26 +194,32 @@ class MapBanView(discord.ui.View):
                 custom_id=f"map2_{map_item['custom_id']}",
                 disabled=map_item['disable']
             )
-            button.callback = self.create_callback(map_item, 'map2')
             self.add_item(button)
     
-    def create_callback(self, map_item, map_type):
-        """Создание callback функции для кнопки"""
-        async def callback(interaction: discord.Interaction):
-            await self.handle_map_ban(interaction, map_item, map_type)
-        return callback
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Проверка перед каждым взаимодействием"""
+        # Получаем участника
+        member = interaction.guild.get_member(interaction.user.id)
+        if not member:
+            await interaction.response.send_message("Не удалось определить вашу роль!", ephemeral=True)
+            return False
+        
+        # Проверяем, имеет ли пользователь право ходить
+        member_roles = [role.id for role in member.roles]
+        if self.current_turn not in member_roles:
+            await interaction.response.send_message("Сейчас не ваш ход!", ephemeral=True)
+            return False
+        
+        return True
     
-    async def handle_map_ban(self, interaction: discord.Interaction, map_item: Dict[str, Any], map_type: str):
+    @discord.ui.button(label="Anubis", style=discord.ButtonStyle.success, custom_id="map1_Anubis", disabled=True)
+    async def anubis_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_map_ban(interaction, "Anubis", "map1")
+    
+    async def handle_map_ban(self, interaction: discord.Interaction, map_name: str, map_type: str):
         """Обработка бана карты"""
         
         guild = interaction.guild
-        if not guild:
-            return
-        
-        # Проверка очереди
-        if not check_role_map(interaction, self.current_turn):
-            await interaction.response.send_message("Сейчас не ваш ход!", ephemeral=True)
-            return
         
         # Баним карту
         if map_type == 'map1':
@@ -217,7 +228,7 @@ class MapBanView(discord.ui.View):
             target_list = self.bot.current_match['map_data_2']
         
         for item in target_list:
-            if item['custom_id'] == map_item['custom_id']:
+            if item['custom_id'] == map_name:
                 item['disable'] = True
                 item['user'] = guild.get_role(self.current_turn).name
                 item['number'] = self.ban_count
@@ -282,42 +293,55 @@ class SideSelectionView(discord.ui.View):
         self.pick2_map = pick2_map
         self.all_maps = all_maps
         self.selection_step = 1  # 1 - первый выбор, 2 - второй выбор
-        
-        # Добавляем кнопки для выбора стороны
-        ct_button = discord.ui.Button(style=discord.ButtonStyle.primary, label="CT", custom_id="ct_select")
-        t_button = discord.ui.Button(style=discord.ButtonStyle.danger, label="T", custom_id="t_select")
-        
-        ct_button.callback = self.create_side_callback("CT")
-        t_button.callback = self.create_side_callback("T")
-        
-        self.add_item(ct_button)
-        self.add_item(t_button)
     
-    def create_side_callback(self, side: str):
-        """Создание callback для выбора стороны"""
-        async def callback(interaction: discord.Interaction):
-            await self.handle_side_choice(interaction, side)
-        return callback
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Проверка перед каждым взаимодействием"""
+        member = interaction.guild.get_member(interaction.user.id)
+        if not member:
+            await interaction.response.send_message("Не удалось определить вашу роль!", ephemeral=True)
+            return False
+        
+        member_roles = [role.id for role in member.roles]
+        
+        if self.selection_step == 1:
+            # Проверяем для первого выбора
+            expected_team_id = None
+            if self.pick2_map['user'] == interaction.guild.get_role(self.team1_id).name:
+                expected_team_id = self.team1_id
+            else:
+                expected_team_id = self.team2_id
+            
+            if expected_team_id not in member_roles:
+                await interaction.response.send_message("Сейчас не ваш ход!", ephemeral=True)
+                return False
+        else:
+            # Проверяем для второго выбора
+            expected_team_id = None
+            if self.pick1_map['user'] == interaction.guild.get_role(self.team1_id).name:
+                expected_team_id = self.team1_id
+            else:
+                expected_team_id = self.team2_id
+            
+            if expected_team_id not in member_roles:
+                await interaction.response.send_message("Сейчас не ваш ход!", ephemeral=True)
+                return False
+        
+        return True
+    
+    @discord.ui.button(label="CT", style=discord.ButtonStyle.primary, custom_id="ct_select")
+    async def ct_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_side_choice(interaction, "CT")
+    
+    @discord.ui.button(label="T", style=discord.ButtonStyle.danger, custom_id="t_select")
+    async def t_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_side_choice(interaction, "T")
     
     async def handle_side_choice(self, interaction: discord.Interaction, side: str):
         """Обработка выбора стороны"""
         
         guild = interaction.guild
-        if not guild:
-            return
         
         if self.selection_step == 1:
-            # Проверяем, что выбирает правильная команда
-            expected_team_id = None
-            if self.pick2_map['user'] == guild.get_role(self.team1_id).name:
-                expected_team_id = self.team1_id
-            else:
-                expected_team_id = self.team2_id
-            
-            if not check_role_map(interaction, expected_team_id):
-                await interaction.response.send_message("Сейчас не ваш ход!", ephemeral=True)
-                return
-            
             # Сохраняем выбор для первого пика
             self.pick1_map['team'] = "T" if side == "CT" else "CT"  # Инвертируем, так как выбирающая команда получает противоположную сторону
             
@@ -335,17 +359,6 @@ class SideSelectionView(discord.ui.View):
             await interaction.response.edit_message(embed=embed, view=self)
             
         else:  # Второй выбор
-            # Проверяем, что выбирает правильная команда
-            expected_team_id = None
-            if self.pick1_map['user'] == guild.get_role(self.team1_id).name:
-                expected_team_id = self.team1_id
-            else:
-                expected_team_id = self.team2_id
-            
-            if not check_role_map(interaction, expected_team_id):
-                await interaction.response.send_message("Сейчас не ваш ход!", ephemeral=True)
-                return
-            
             # Сохраняем выбор для второго пика
             self.pick2_map['team'] = "T" if side == "CT" else "CT"
             
@@ -375,6 +388,7 @@ class SideSelectionView(discord.ui.View):
 async def on_ready():
     print(f'Бот авторизовался как {bot.user.name}!')
     print(f'ID бота: {bot.user.id}')
+    print(f'Подключен к {len(bot.guilds)} серверам')
     print('------')
     
     # Устанавливаем статус бота
